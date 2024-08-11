@@ -1,7 +1,11 @@
-use std::{error, fmt, io, net, num, str, string};
+use alloc::{
+    boxed::Box,
+    string::{FromUtf8Error, String},
+};
+use core::{error, fmt, net, num, str};
 use unsigned_varint::decode;
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// Error types
 #[derive(Debug)]
@@ -43,12 +47,6 @@ impl error::Error for Error {
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::ParsingError(err.into())
-    }
-}
-
 impl From<multihash::Error> for Error {
     fn from(err: multihash::Error) -> Error {
         Error::ParsingError(err.into())
@@ -73,8 +71,8 @@ impl From<num::ParseIntError> for Error {
     }
 }
 
-impl From<string::FromUtf8Error> for Error {
-    fn from(err: string::FromUtf8Error) -> Error {
+impl From<FromUtf8Error> for Error {
+    fn from(err: FromUtf8Error) -> Error {
         Error::ParsingError(err.into())
     }
 }

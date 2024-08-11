@@ -1,17 +1,18 @@
+use alloc::str;
+use core::fmt;
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use core::str::FromStr;
+
 use crate::onion_addr::Onion3Addr;
 use crate::{Error, Result};
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+use alloc::string::ToString;
 use arrayref::array_ref;
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
+use bytes::{Buf, BufMut, Bytes};
 use data_encoding::BASE32;
 use libp2p_identity::PeerId;
-use std::{
-    borrow::Cow,
-    convert::From,
-    fmt,
-    io::{Cursor, Write},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    str::{self, FromStr},
-};
 use unsigned_varint::{decode, encode};
 
 // All the values are obtained by converting hexadecimal protocol codes to u32.
@@ -241,8 +242,8 @@ impl<'a> Protocol<'a> {
         match id {
             DCCP => {
                 let (data, rest) = split_at(2, input)?;
-                let mut rdr = Cursor::new(data);
-                let num = rdr.read_u16::<BigEndian>()?;
+                let mut rdr = Bytes::from(data);
+                let num = rdr.get_u16();
                 Ok((Protocol::Dccp(num), rest))
             }
             DNS => {
@@ -279,11 +280,11 @@ impl<'a> Protocol<'a> {
             }
             IP6 => {
                 let (data, rest) = split_at(16, input)?;
-                let mut rdr = Cursor::new(data);
+                let mut rdr = Bytes::from(data);
                 let mut seg = [0_u16; 8];
 
                 for x in seg.iter_mut() {
-                    *x = rdr.read_u16::<BigEndian>()?;
+                    *x = rdr.get_u16();
                 }
 
                 let addr = Ipv6Addr::new(
@@ -303,8 +304,8 @@ impl<'a> Protocol<'a> {
             P2P_WEBSOCKET_STAR => Ok((Protocol::P2pWebSocketStar, input)),
             MEMORY => {
                 let (data, rest) = split_at(8, input)?;
-                let mut rdr = Cursor::new(data);
-                let num = rdr.read_u64::<BigEndian>()?;
+                let mut rdr = Bytes::from(data);
+                let num = rdr.get_u64();
                 Ok((Protocol::Memory(num), rest))
             }
             ONION => {
@@ -338,22 +339,22 @@ impl<'a> Protocol<'a> {
             QUIC_V1 => Ok((Protocol::QuicV1, input)),
             SCTP => {
                 let (data, rest) = split_at(2, input)?;
-                let mut rdr = Cursor::new(data);
-                let num = rdr.read_u16::<BigEndian>()?;
+                let mut rdr = Bytes::from(data);
+                let num = rdr.get_u16();
                 Ok((Protocol::Sctp(num), rest))
             }
             TCP => {
                 let (data, rest) = split_at(2, input)?;
-                let mut rdr = Cursor::new(data);
-                let num = rdr.read_u16::<BigEndian>()?;
+                let mut rdr = Bytes::from(data);
+                let num = rdr.get_u16();
                 Ok((Protocol::Tcp(num), rest))
             }
             TLS => Ok((Protocol::Tls, input)),
             NOISE => Ok((Protocol::Noise, input)),
             UDP => {
                 let (data, rest) = split_at(2, input)?;
-                let mut rdr = Cursor::new(data);
-                let num = rdr.read_u16::<BigEndian>()?;
+                let mut rdr = Bytes::from(data);
+                let num = rdr.get_u16();
                 Ok((Protocol::Udp(num), rest))
             }
             UDT => Ok((Protocol::Udt, input)),
@@ -382,121 +383,120 @@ impl<'a> Protocol<'a> {
 
     /// Encode this protocol by writing its binary representation into
     /// the given `Write` impl.
-    pub fn write_bytes<W: Write>(&self, w: &mut W) -> Result<()> {
+    pub fn write_bytes<W: BufMut>(&self, w: &mut W) {
         let mut buf = encode::u32_buffer();
         match self {
             Protocol::Ip4(addr) => {
-                w.write_all(encode::u32(IP4, &mut buf))?;
-                w.write_all(&addr.octets())?
+                w.put(encode::u32(IP4, &mut buf));
+                w.put(&addr.octets()[..]);
             }
             Protocol::Ip6(addr) => {
-                w.write_all(encode::u32(IP6, &mut buf))?;
+                w.put(encode::u32(IP6, &mut buf));
                 for &segment in &addr.segments() {
-                    w.write_u16::<BigEndian>(segment)?
+                    w.put_u16(segment);
                 }
             }
             Protocol::Tcp(port) => {
-                w.write_all(encode::u32(TCP, &mut buf))?;
-                w.write_u16::<BigEndian>(*port)?
+                w.put(encode::u32(TCP, &mut buf));
+                w.put_u16(*port);
             }
-            Protocol::Tls => w.write_all(encode::u32(TLS, &mut buf))?,
-            Protocol::Noise => w.write_all(encode::u32(NOISE, &mut buf))?,
+            Protocol::Tls => w.put(encode::u32(TLS, &mut buf)),
+            Protocol::Noise => w.put(encode::u32(NOISE, &mut buf)),
             Protocol::Udp(port) => {
-                w.write_all(encode::u32(UDP, &mut buf))?;
-                w.write_u16::<BigEndian>(*port)?
+                w.put(encode::u32(UDP, &mut buf));
+                w.put_u16(*port);
             }
             Protocol::Dccp(port) => {
-                w.write_all(encode::u32(DCCP, &mut buf))?;
-                w.write_u16::<BigEndian>(*port)?
+                w.put(encode::u32(DCCP, &mut buf));
+                w.put_u16(*port);
             }
             Protocol::Sctp(port) => {
-                w.write_all(encode::u32(SCTP, &mut buf))?;
-                w.write_u16::<BigEndian>(*port)?
+                w.put(encode::u32(SCTP, &mut buf));
+                w.put_u16(*port);
             }
             Protocol::Dns(s) => {
-                w.write_all(encode::u32(DNS, &mut buf))?;
+                w.put(encode::u32(DNS, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
             Protocol::Dns4(s) => {
-                w.write_all(encode::u32(DNS4, &mut buf))?;
+                w.put(encode::u32(DNS4, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
             Protocol::Dns6(s) => {
-                w.write_all(encode::u32(DNS6, &mut buf))?;
+                w.put(encode::u32(DNS6, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
             Protocol::Dnsaddr(s) => {
-                w.write_all(encode::u32(DNSADDR, &mut buf))?;
+                w.put(encode::u32(DNSADDR, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
             Protocol::Unix(s) => {
-                w.write_all(encode::u32(UNIX, &mut buf))?;
+                w.put(encode::u32(UNIX, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
             Protocol::P2p(peer_id) => {
-                w.write_all(encode::u32(P2P, &mut buf))?;
+                w.put(encode::u32(P2P, &mut buf));
                 let bytes = peer_id.to_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(&bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(&bytes[..]);
             }
             Protocol::Onion(addr, port) => {
-                w.write_all(encode::u32(ONION, &mut buf))?;
-                w.write_all(addr.as_ref())?;
-                w.write_u16::<BigEndian>(*port)?
+                w.put(encode::u32(ONION, &mut buf));
+                w.put(&addr.as_ref()[..]);
+                w.put_u16(*port);
             }
             Protocol::Onion3(addr) => {
-                w.write_all(encode::u32(ONION3, &mut buf))?;
-                w.write_all(addr.hash().as_ref())?;
-                w.write_u16::<BigEndian>(addr.port())?
+                w.put(encode::u32(ONION3, &mut buf));
+                w.put(addr.hash().as_ref());
+                w.put_u16(addr.port());
             }
-            Protocol::Quic => w.write_all(encode::u32(QUIC, &mut buf))?,
-            Protocol::QuicV1 => w.write_all(encode::u32(QUIC_V1, &mut buf))?,
-            Protocol::Utp => w.write_all(encode::u32(UTP, &mut buf))?,
-            Protocol::Udt => w.write_all(encode::u32(UDT, &mut buf))?,
-            Protocol::Http => w.write_all(encode::u32(HTTP, &mut buf))?,
-            Protocol::Https => w.write_all(encode::u32(HTTPS, &mut buf))?,
-            Protocol::WebTransport => w.write_all(encode::u32(WEBTRANSPORT, &mut buf))?,
-            Protocol::Ws(ref s) if s == "/" => w.write_all(encode::u32(WS, &mut buf))?,
+            Protocol::Quic => w.put(encode::u32(QUIC, &mut buf)),
+            Protocol::QuicV1 => w.put(encode::u32(QUIC_V1, &mut buf)),
+            Protocol::Utp => w.put(encode::u32(UTP, &mut buf)),
+            Protocol::Udt => w.put(encode::u32(UDT, &mut buf)),
+            Protocol::Http => w.put(encode::u32(HTTP, &mut buf)),
+            Protocol::Https => w.put(encode::u32(HTTPS, &mut buf)),
+            Protocol::WebTransport => w.put(encode::u32(WEBTRANSPORT, &mut buf)),
+            Protocol::Ws(ref s) if s == "/" => w.put(encode::u32(WS, &mut buf)),
             Protocol::Ws(s) => {
-                w.write_all(encode::u32(WS_WITH_PATH, &mut buf))?;
+                w.put(encode::u32(WS_WITH_PATH, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
-            Protocol::Wss(ref s) if s == "/" => w.write_all(encode::u32(WSS, &mut buf))?,
+            Protocol::Wss(ref s) if s == "/" => w.put(encode::u32(WSS, &mut buf)),
             Protocol::Wss(s) => {
-                w.write_all(encode::u32(WSS_WITH_PATH, &mut buf))?;
+                w.put(encode::u32(WSS_WITH_PATH, &mut buf));
                 let bytes = s.as_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(bytes);
             }
-            Protocol::P2pWebSocketStar => w.write_all(encode::u32(P2P_WEBSOCKET_STAR, &mut buf))?,
-            Protocol::P2pWebRtcStar => w.write_all(encode::u32(P2P_WEBRTC_STAR, &mut buf))?,
-            Protocol::WebRTCDirect => w.write_all(encode::u32(WEBRTC_DIRECT, &mut buf))?,
+            Protocol::P2pWebSocketStar => w.put(encode::u32(P2P_WEBSOCKET_STAR, &mut buf)),
+            Protocol::P2pWebRtcStar => w.put(encode::u32(P2P_WEBRTC_STAR, &mut buf)),
+            Protocol::WebRTCDirect => w.put(encode::u32(WEBRTC_DIRECT, &mut buf)),
             Protocol::Certhash(hash) => {
-                w.write_all(encode::u32(CERTHASH, &mut buf))?;
+                w.put(encode::u32(CERTHASH, &mut buf));
                 let bytes = hash.to_bytes();
-                w.write_all(encode::usize(bytes.len(), &mut encode::usize_buffer()))?;
-                w.write_all(&bytes)?
+                w.put(encode::usize(bytes.len(), &mut encode::usize_buffer()));
+                w.put(&bytes[..]);
             }
-            Protocol::P2pWebRtcDirect => w.write_all(encode::u32(P2P_WEBRTC_DIRECT, &mut buf))?,
-            Protocol::P2pCircuit => w.write_all(encode::u32(P2P_CIRCUIT, &mut buf))?,
+            Protocol::P2pWebRtcDirect => w.put(encode::u32(P2P_WEBRTC_DIRECT, &mut buf)),
+            Protocol::P2pCircuit => w.put(encode::u32(P2P_CIRCUIT, &mut buf)),
             Protocol::Memory(port) => {
-                w.write_all(encode::u32(MEMORY, &mut buf))?;
-                w.write_u64::<BigEndian>(*port)?
+                w.put(encode::u32(MEMORY, &mut buf));
+                w.put_u64(*port);
             }
         }
-        Ok(())
     }
 
     /// Turn this `Protocol` into one that owns its data, thus being valid for any lifetime.

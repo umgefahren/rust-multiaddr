@@ -1,4 +1,5 @@
-use std::{borrow::Cow, fmt};
+use alloc::borrow::Cow;
+use core::fmt;
 
 /// Represents an Onion v3 address
 #[derive(Clone)]
@@ -44,7 +45,7 @@ impl<'a> From<(&'a [u8; 35], u16)> for Onion3Addr<'a> {
 impl fmt::Debug for Onion3Addr<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         f.debug_tuple("Onion3Addr")
-            .field(&format!("{:02x?}", &self.0[..]))
+            .field(&alloc::format!("{:02x?}", &self.0[..]))
             .field(&self.1)
             .finish()
     }

@@ -1,5 +1,10 @@
 //! Implementation of [multiaddr](https://github.com/multiformats/multiaddr) in Rust.
+#![no_std]
 
+extern crate alloc;
+
+use alloc::string::{String, ToString};
+use bytes::{Bytes, BytesMut};
 pub use multihash;
 
 mod errors;
@@ -12,19 +17,21 @@ mod from_url;
 pub use self::errors::{Error, Result};
 pub use self::onion_addr::Onion3Addr;
 pub use self::protocol::Protocol;
-use serde::{
-    de::{self, Error as DeserializerError},
-    Deserialize, Deserializer, Serialize, Serializer,
-};
-use std::{
+use alloc::sync::Arc;
+use core::{
     convert::TryFrom,
-    fmt, io,
+    fmt,
     iter::FromIterator,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     result::Result as StdResult,
     str::FromStr,
-    sync::Arc,
 };
+use serde::{
+    de::{self, Error as DeserializerError},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+
+use alloc::vec::Vec;
 
 use libp2p_identity::PeerId;
 
@@ -34,28 +41,28 @@ pub use self::from_url::{from_url, from_url_lossy, FromUrlErr};
 static_assertions::const_assert! {
     // This check is most certainly overkill right now, but done here
     // anyway to ensure the `as u64` casts in this crate are safe.
-    std::mem::size_of::<usize>() <= std::mem::size_of::<u64>()
+    core::mem::size_of::<usize>() <= core::mem::size_of::<u64>()
 }
 
 /// Representation of a Multiaddr.
 #[allow(clippy::rc_buffer)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct Multiaddr {
-    bytes: Arc<Vec<u8>>,
+    bytes: Bytes,
 }
 
 impl Multiaddr {
     /// Create a new, empty multiaddress.
     pub fn empty() -> Self {
         Self {
-            bytes: Arc::new(Vec::new()),
+            bytes: Bytes::new(),
         }
     }
 
     /// Create a new, empty multiaddress with the given capacity.
     pub fn with_capacity(n: usize) -> Self {
         Self {
-            bytes: Arc::new(Vec::with_capacity(n)),
+            bytes: BytesMut::with_capacity(n).freeze(),
         }
     }
 
@@ -87,10 +94,9 @@ impl Multiaddr {
     /// ```
     ///
     pub fn push(&mut self, p: Protocol<'_>) {
-        let mut w = io::Cursor::<&mut Vec<u8>>::new(Arc::make_mut(&mut self.bytes));
-        w.set_position(w.get_ref().len() as u64);
-        p.write_bytes(&mut w)
-            .expect("Writing to a `io::Cursor<&mut Vec<u8>>` never fails.")
+        let mut w: BytesMut = self.bytes.clone().into();
+        p.write_bytes(&mut w);
+        self.bytes = w.freeze();
     }
 
     /// Pops the last `Protocol` of this multiaddr, or `None` if the multiaddr is empty.
@@ -116,16 +122,15 @@ impl Multiaddr {
             slice = s
         };
         let remaining_len = self.bytes.len() - slice.len();
-        Arc::make_mut(&mut self.bytes).truncate(remaining_len);
+        self.bytes.truncate(remaining_len);
         Some(protocol)
     }
 
     /// Like [`Multiaddr::push`] but consumes `self`.
     pub fn with(mut self, p: Protocol<'_>) -> Self {
-        let mut w = io::Cursor::<&mut Vec<u8>>::new(Arc::make_mut(&mut self.bytes));
-        w.set_position(w.get_ref().len() as u64);
-        p.write_bytes(&mut w)
-            .expect("Writing to a `io::Cursor<&mut Vec<u8>>` never fails.");
+        let mut w = BytesMut::from(self.bytes);
+        p.write_bytes(&mut w);
+        self.bytes = w.freeze();
         self
     }
 
@@ -133,7 +138,7 @@ impl Multiaddr {
     ///
     /// Fails if this address ends in a _different_ [`PeerId`].
     /// In that case, the original, unmodified address is returned.
-    pub fn with_p2p(self, peer: PeerId) -> std::result::Result<Self, Self> {
+    pub fn with_p2p(self, peer: PeerId) -> core::result::Result<Self, Self> {
         match self.iter().last() {
             Some(Protocol::P2p(p)) if p == peer => Ok(self),
             Some(Protocol::P2p(_)) => Err(self),
@@ -261,13 +266,12 @@ impl<'a> FromIterator<Protocol<'a>> for Multiaddr {
     where
         T: IntoIterator<Item = Protocol<'a>>,
     {
-        let mut writer = Vec::new();
+        let mut writer = BytesMut::new();
         for cmp in iter {
-            cmp.write_bytes(&mut writer)
-                .expect("Writing to a `Vec` never fails.");
+            cmp.write_bytes(&mut writer);
         }
         Multiaddr {
-            bytes: Arc::new(writer),
+            bytes: writer.freeze(),
         }
     }
 }
@@ -276,7 +280,7 @@ impl FromStr for Multiaddr {
     type Err = Error;
 
     fn from_str(input: &str) -> Result<Self> {
-        let mut writer = Vec::new();
+        let mut writer = BytesMut::new();
         let mut parts = input.split('/').peekable();
 
         if Some("") != parts.next() {
@@ -286,12 +290,11 @@ impl FromStr for Multiaddr {
 
         while parts.peek().is_some() {
             let p = Protocol::from_str_parts(&mut parts)?;
-            p.write_bytes(&mut writer)
-                .expect("Writing to a `Vec` never fails.");
+            p.write_bytes(&mut writer);
         }
 
         Ok(Multiaddr {
-            bytes: Arc::new(writer),
+            bytes: writer.freeze(),
         })
     }
 }
@@ -329,10 +332,9 @@ impl<'a> Iterator for ProtoStackIter<'a> {
 
 impl<'a> From<Protocol<'a>> for Multiaddr {
     fn from(p: Protocol<'a>) -> Multiaddr {
-        let mut w = Vec::new();
-        p.write_bytes(&mut w)
-            .expect("Writing to a `Vec` never fails.");
-        Multiaddr { bytes: Arc::new(w) }
+        let mut w = BytesMut::new();
+        p.write_bytes(&mut w);
+        Multiaddr { bytes: w.freeze() }
     }
 }
 
@@ -367,7 +369,11 @@ impl TryFrom<Vec<u8>> for Multiaddr {
             let (_, s) = Protocol::from_bytes(slice)?;
             slice = s
         }
-        Ok(Multiaddr { bytes: Arc::new(v) })
+        let mut bytes = BytesMut::with_capacity(v.len());
+        bytes.extend_from_slice(&v);
+        Ok(Multiaddr {
+            bytes: bytes.freeze(),
+        })
     }
 }
 
@@ -420,7 +426,7 @@ impl<'de> Deserialize<'de> for Multiaddr {
                 mut seq: A,
             ) -> StdResult<Self::Value, A::Error> {
                 let mut buf: Vec<u8> =
-                    Vec::with_capacity(std::cmp::min(seq.size_hint().unwrap_or(0), 4096));
+                    Vec::with_capacity(core::cmp::min(seq.size_hint().unwrap_or(0), 4096));
                 while let Some(e) = seq.next_element()? {
                     buf.push(e);
                 }

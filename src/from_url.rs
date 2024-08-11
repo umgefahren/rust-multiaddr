@@ -1,5 +1,7 @@
+use alloc::borrow::ToOwned;
+
 use crate::{Multiaddr, Protocol};
-use std::{error, fmt, iter, net::IpAddr};
+use core::{error, fmt, iter, net::IpAddr};
 
 /// Attempts to parse an URL into a multiaddress.
 ///
@@ -25,7 +27,7 @@ use std::{error, fmt, iter, net::IpAddr};
 /// assert_eq!(addr, "/ip4/127.0.0.1/tcp/8080/ws".parse().unwrap());
 /// ```
 ///
-pub fn from_url(url: &str) -> std::result::Result<Multiaddr, FromUrlErr> {
+pub fn from_url(url: &str) -> core::result::Result<Multiaddr, FromUrlErr> {
     from_url_inner(url, false)
 }
 
@@ -45,12 +47,12 @@ pub fn from_url(url: &str) -> std::result::Result<Multiaddr, FromUrlErr> {
 /// assert!(multiaddr::from_url_lossy(addr).is_ok());
 /// ```
 ///
-pub fn from_url_lossy(url: &str) -> std::result::Result<Multiaddr, FromUrlErr> {
+pub fn from_url_lossy(url: &str) -> core::result::Result<Multiaddr, FromUrlErr> {
     from_url_inner(url, true)
 }
 
 /// Underlying implementation of `from_url` and `from_url_lossy`.
-fn from_url_inner(url: &str, lossy: bool) -> std::result::Result<Multiaddr, FromUrlErr> {
+fn from_url_inner(url: &str, lossy: bool) -> core::result::Result<Multiaddr, FromUrlErr> {
     let url = url::Url::parse(url).map_err(|_| FromUrlErr::BadUrl)?;
 
     match url.scheme() {
@@ -65,7 +67,7 @@ fn from_url_inner(url: &str, lossy: bool) -> std::result::Result<Multiaddr, From
 fn from_url_inner_http_ws(
     url: url::Url,
     lossy: bool,
-) -> std::result::Result<Multiaddr, FromUrlErr> {
+) -> core::result::Result<Multiaddr, FromUrlErr> {
     let (protocol, lost_path, default_port) = match url.scheme() {
         "ws" => (Protocol::Ws(url.path().to_owned().into()), false, 80),
         "wss" => (Protocol::Wss(url.path().to_owned().into()), false, 443),
@@ -102,7 +104,7 @@ fn from_url_inner_http_ws(
 }
 
 /// Called when `url.scheme()` is a path-like URL.
-fn from_url_inner_path(url: url::Url, lossy: bool) -> std::result::Result<Multiaddr, FromUrlErr> {
+fn from_url_inner_path(url: url::Url, lossy: bool) -> core::result::Result<Multiaddr, FromUrlErr> {
     let protocol = match url.scheme() {
         "unix" => Protocol::Unix(url.path().to_owned().into()),
         _ => unreachable!("We only call this function for one of the given schemes; qed"),
@@ -145,6 +147,8 @@ impl error::Error for FromUrlErr {}
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::String, vec::Vec};
+
     use super::*;
 
     #[test]
