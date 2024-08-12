@@ -6,7 +6,6 @@ use core::str::FromStr;
 use crate::onion_addr::Onion3Addr;
 use crate::{Error, Result};
 use alloc::borrow::Cow;
-use alloc::boxed::Box;
 use alloc::string::ToString;
 use arrayref::array_ref;
 use byteorder::{BigEndian, ByteOrder};
@@ -181,7 +180,7 @@ impl<'a> Protocol<'a> {
                 let s = iter.next().ok_or(Error::InvalidProtocolString)?;
                 let decoded = multibase::Base::Base58Btc.decode(s)?;
                 let peer_id =
-                    PeerId::from_bytes(&decoded).map_err(|e| Error::ParsingError(Box::new(e)))?;
+                    PeerId::from_bytes(&decoded).map_err(|e| Error::ParsingError(e.into()))?;
                 Ok(Protocol::P2p(peer_id))
             }
             "http" => Ok(Protocol::Http),
@@ -326,7 +325,7 @@ impl<'a> Protocol<'a> {
                 let (data, rest) = split_at(n, input)?;
                 Ok((
                     Protocol::P2p(
-                        PeerId::from_bytes(data).map_err(|e| Error::ParsingError(Box::new(e)))?,
+                        PeerId::from_bytes(data).map_err(|e| Error::ParsingError(e.into()))?,
                     ),
                     rest,
                 ))
