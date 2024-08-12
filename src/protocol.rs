@@ -9,8 +9,8 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use arrayref::array_ref;
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
-use bytes::{Buf, BufMut, Bytes};
+use byteorder::{BigEndian, ByteOrder};
+use bytes::{Buf, BufMut};
 use data_encoding::BASE32;
 use libp2p_identity::PeerId;
 use unsigned_varint::{decode, encode};
@@ -241,8 +241,7 @@ impl<'a> Protocol<'a> {
         let (id, input) = decode::u32(input)?;
         match id {
             DCCP => {
-                let (data, rest) = split_at(2, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(2, input)?;
                 let num = rdr.get_u16();
                 Ok((Protocol::Dccp(num), rest))
             }
@@ -279,8 +278,7 @@ impl<'a> Protocol<'a> {
                 ))
             }
             IP6 => {
-                let (data, rest) = split_at(16, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(16, input)?;
                 let mut seg = [0_u16; 8];
 
                 for x in seg.iter_mut() {
@@ -303,8 +301,7 @@ impl<'a> Protocol<'a> {
             }
             P2P_WEBSOCKET_STAR => Ok((Protocol::P2pWebSocketStar, input)),
             MEMORY => {
-                let (data, rest) = split_at(8, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(8, input)?;
                 let num = rdr.get_u64();
                 Ok((Protocol::Memory(num), rest))
             }
@@ -338,22 +335,19 @@ impl<'a> Protocol<'a> {
             QUIC => Ok((Protocol::Quic, input)),
             QUIC_V1 => Ok((Protocol::QuicV1, input)),
             SCTP => {
-                let (data, rest) = split_at(2, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(2, input)?;
                 let num = rdr.get_u16();
                 Ok((Protocol::Sctp(num), rest))
             }
             TCP => {
-                let (data, rest) = split_at(2, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(2, input)?;
                 let num = rdr.get_u16();
                 Ok((Protocol::Tcp(num), rest))
             }
             TLS => Ok((Protocol::Tls, input)),
             NOISE => Ok((Protocol::Noise, input)),
             UDP => {
-                let (data, rest) = split_at(2, input)?;
-                let mut rdr = Bytes::from(data);
+                let (mut rdr, rest) = split_at(2, input)?;
                 let num = rdr.get_u16();
                 Ok((Protocol::Udp(num), rest))
             }

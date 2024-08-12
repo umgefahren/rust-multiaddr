@@ -17,7 +17,6 @@ mod from_url;
 pub use self::errors::{Error, Result};
 pub use self::onion_addr::Onion3Addr;
 pub use self::protocol::Protocol;
-use alloc::sync::Arc;
 use core::{
     convert::TryFrom,
     fmt,
@@ -359,21 +358,29 @@ impl From<Ipv6Addr> for Multiaddr {
     }
 }
 
-impl TryFrom<Vec<u8>> for Multiaddr {
+impl TryFrom<&[u8]> for Multiaddr {
     type Error = Error;
 
-    fn try_from(v: Vec<u8>) -> Result<Self> {
-        // Check if the argument is a valid `Multiaddr` by reading its protocols.
-        let mut slice = &v[..];
+    fn try_from(v: &[u8]) -> StdResult<Self, Self::Error> {
+        let mut slice = v;
         while !slice.is_empty() {
             let (_, s) = Protocol::from_bytes(slice)?;
             slice = s
         }
         let mut bytes = BytesMut::with_capacity(v.len());
-        bytes.extend_from_slice(&v);
+        bytes.extend_from_slice(v);
         Ok(Multiaddr {
             bytes: bytes.freeze(),
         })
+    }
+}
+
+impl TryFrom<Vec<u8>> for Multiaddr {
+    type Error = Error;
+
+    fn try_from(v: Vec<u8>) -> Result<Self> {
+        // Check if the argument is a valid `Multiaddr` by reading its protocols.
+        Self::try_from(&v[..])
     }
 }
 
@@ -443,15 +450,17 @@ impl<'de> Deserialize<'de> for Multiaddr {
             fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> StdResult<Self::Value, E> {
                 self.visit_str(v)
             }
+            #[cfg(feature = "std")]
             fn visit_string<E: de::Error>(self, v: String) -> StdResult<Self::Value, E> {
                 self.visit_str(&v)
             }
             fn visit_bytes<E: de::Error>(self, v: &[u8]) -> StdResult<Self::Value, E> {
-                self.visit_byte_buf(v.into())
+                Multiaddr::try_from(v).map_err(DeserializerError::custom)
             }
             fn visit_borrowed_bytes<E: de::Error>(self, v: &'de [u8]) -> StdResult<Self::Value, E> {
-                self.visit_byte_buf(v.into())
+                Multiaddr::try_from(v).map_err(DeserializerError::custom)
             }
+            #[cfg(feature = "std")]
             fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> StdResult<Self::Value, E> {
                 Multiaddr::try_from(v).map_err(DeserializerError::custom)
             }
